@@ -7,10 +7,6 @@ knowledge, and temporary effects during a match. It evaluates the legal
 decisions available to both sides and recommends the route with the best
 estimated chance of winning.
 
-The project was previously called *Buckshot Roulette Helper*. **Buckshot
-Roulette Strategist** better reflects its purpose: analyzing the match and
-recommending a strategy instead of merely recording the game state.
-
 > This is an independent fan project. It is not affiliated with or endorsed by
 > the developers or publishers of Buckshot Roulette.
 
