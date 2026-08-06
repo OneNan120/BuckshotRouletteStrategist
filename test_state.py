@@ -5,7 +5,7 @@ from action import Action
 from item import defaultItemDict, findItemObjByName
 from main import parseInput
 from outcome import Outcome
-from solver import fairApproximateResult, immediateItemCost
+from solver import fairApproximateResult, immediateItemCost, nonDominatedActions
 from state import State, applyAction
 
 
@@ -125,6 +125,52 @@ class ShellTransitionTests(unittest.TestCase):
         state.shell_inverted = True
         action = Action("Use Item", "Player", "Beer")
         self.assertEqual(immediateItemCost(action, state), 2)
+
+    def test_adrenaline_selection_costs_less_than_expiring_it(self):
+        steal = Action(
+            "Select Item", "Player", findItemObjByName("Inverter")
+        )
+        expire = Action("Cancel Adrenaline", "Player")
+
+        self.assertEqual(immediateItemCost(steal), 0)
+        self.assertEqual(immediateItemCost(expire), 1)
+
+    def test_equal_adrenaline_estimates_prefer_stealing_an_item(self):
+        state = state_with_shells(2, 3)
+        state.in_Adrenaline = True
+        state.dealer_items["Inverter"] = 1
+        steal = Action(
+            "Select Item", "Player", findItemObjByName("Inverter")
+        )
+        expire = Action("Cancel Adrenaline", "Player")
+        state.listLegalActions = lambda: [steal, expire]
+
+        with patch(
+            "solver.actionOutcomeKey",
+            side_effect=lambda _, action: str(action),
+        ), patch(
+            "solver.evaluateRootActionFairly",
+            side_effect=lambda current, action: (
+                1.0, immediateItemCost(action, current)
+            ),
+        ):
+            result = fairApproximateResult(state)
+
+        self.assertIs(result.best_action, steal)
+
+    def test_solver_keeps_cheapest_action_for_equivalent_outcomes(self):
+        state = state_with_shells(2, 3)
+        free = Action("Shoot Opponent", "Player")
+        costly = Action(
+            "Use Item", "Player", findItemObjByName("Inverter")
+        )
+        outcome = state.clone()
+        outcome.chance = 1.0
+
+        state.listLegalActions = lambda: [costly, free]
+        state.listAllNextStates = lambda action: [outcome.clone()]
+
+        self.assertEqual(nonDominatedActions(state), [free])
 
     def test_approximate_ranking_does_not_replace_higher_value_with_info(self):
         beer = Action(

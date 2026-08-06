@@ -101,8 +101,18 @@ def healthRatio(state: State) -> float:
 
 
 def immediateItemCost(action: Action, state: State = None) -> int:
-    """Number of items consumed by taking this action."""
-    cost = 1 if action.item is not None else 0
+    """Actor-owned resources wasted by taking this action.
+
+    Adrenaline has already been consumed by the time item selection begins.
+    Selecting an item spends an opponent-owned resource, whereas cancelling
+    wastes the active Adrenaline without receiving its effect.
+    """
+    if action.type == "Select Item":
+        cost = 0
+    elif action.type == "Cancel Adrenaline":
+        cost = 1
+    else:
+        cost = 1 if action.item is not None else 0
     item_name = getattr(action.item, "name", action.item)
     if state is not None and item_name == "Beer" and state.shell_inverted:
         # Beer consumes both itself and the pending value of the Inverter.
@@ -124,6 +134,43 @@ def searchPriority(action: Action) -> int:
     if action.type in ("Shoot Self", "Shoot Opponent"):
         return 2
     return 3
+
+
+def outcomeStateKey(state: State):
+    """Identity of an outcome excluding the resources spent to reach it."""
+    key = state.cache_key()
+    # Item inventories occupy positions 8 and 9 in State.cache_key().  They
+    # are deliberately excluded: equivalent outcomes are compared by how
+    # many resources their actions consume, not made different by that cost.
+    return key[:8] + key[10:]
+
+
+def actionOutcomeKey(state: State, action: Action):
+    """Canonical probability distribution produced by an action."""
+    outcomes = {}
+    for next_state in state.listAllNextStates(action):
+        key = outcomeStateKey(next_state)
+        outcomes[key] = outcomes.get(key, 0.0) + next_state.chance
+    return tuple(sorted(
+        ((repr(key), round(probability, 12))
+         for key, probability in outcomes.items())
+    ))
+
+
+def nonDominatedActions(state: State):
+    """Discard only actions with an equivalent outcome at a lower cost."""
+    actions = state.listLegalActions()
+    cheapest = {}
+    keyed_actions = []
+    for action in actions:
+        outcome_key = actionOutcomeKey(state, action)
+        cost = immediateItemCost(action, state)
+        keyed_actions.append((action, outcome_key, cost))
+        cheapest[outcome_key] = min(cost, cheapest.get(outcome_key, cost))
+    return [
+        action for action, outcome_key, cost in keyed_actions
+        if cost == cheapest[outcome_key]
+    ]
 
 class Solver:
     def solve(self, state: State):
@@ -219,7 +266,7 @@ def calc(state: State, context=None) -> float:
         context.expanded_states += 1
         # state value = max action value
         action_values = []
-        actions = sorted(state.listLegalActions(), key=searchPriority)
+        actions = sorted(nonDominatedActions(state), key=searchPriority)
         best_action = None
         worst_action = None
         max_action_value = 0.0
@@ -335,7 +382,7 @@ def fairApproximateResult(state: State) -> Result:
     """Evaluate each root action with the same independent node allowance."""
     evaluations = []
 
-    for action in state.listLegalActions():
+    for action in nonDominatedActions(state):
         cache.clear()
         action_value, item_cost = evaluateRootActionFairly(state, action)
         evaluations.append((action, action_value, item_cost))
